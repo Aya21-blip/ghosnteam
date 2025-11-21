@@ -1,0 +1,615 @@
+<!--
+Project: Ghousn-Team2 Offline Registration App
+Files included below. Open `index.html` in a browser (desktop or mobile) to run. Works fully offline once opened (we include a simple service worker), stores data in localStorage and lets you export CSV.
+
+File list:
+- index.html        (single-file app + service worker registration)
+- sw.js             (service worker for offline caching)
+- manifest.json     (web app manifest)
+- assets/logo.png   (your logo - you said you placed it in assets/logo.png)
+
+Important notes:
+- Password for all users is fixed: ghosn.team2/9
+- Colors: only white and light green are used.
+- Data is saved to localStorage under key: ghosn_team2_records
+- Export button downloads CSV (can be opened in Excel).
+- No internet required after first load.
+
+Paste these files into your project folder (you said you have main.py and assets/logo.png). Replace main.py with index.html or keep it. To run: open index.html in a browser. On Android, you can "Add to Home screen" to run like an app.
+-->
+
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>تسجيل - فريق تطوعي</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    :root{--green:#e6f7ea;--accent:#bfeacb;--text:#0a3d21}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, sans-serif;background:white;color:var(--text)}
+    .app{min-height:100%;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{width:100%;max-width:840px;background:var(--green);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(0,0,0,0.06)}
+    .center{display:flex;flex-direction:column;align-items:center;gap:10px}
+    img.logo{width:110px;height:110px;object-fit:contain}
+    input[type=text], input[type=number], textarea, select{width:100%;padding:8px;border-radius:8px;border:1px solid #dfeadc;background:white}
+    button{background:var(--accent);border:none;padding:10px 14px;border-radius:10px;cursor:pointer}
+    .row{display:flex;gap:10px}
+    .space{height:12px}
+    .small{font-size:0.9rem}
+    .hidden{display:none}
+    table{width:100%;border-collapse:collapse;background:white}
+    th,td{padding:8px;border:1px solid #e6efe6;text-align:right}
+    .actions button{margin-left:6px}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:white}
+    @media(max-width:600px){.row{flex-direction:column}}
+  .form-field {
+     display: flex;
+     flex-direction: column; /* label فوق الحقل */
+     gap: 6px;
+     margin-bottom: 12px;
+   }
+
+/* تحكم خاص بعناوين الحقول الصغيرة */
+   .form-field > label { font-weight: 600; }
+
+/* جعل أزرار الإضافة (فرد آخر، رقم آخر) تظهر مستقلة أسفل الحقل */
+   .btn-inline {
+     margin-top: 6px;
+     align-self: flex-start;
+   }
+
+   /* اجعل قوائم الأبناء و الأرقام عمودية */
+     #children-list > div, #phones-list > div {
+     display: flex;
+     gap: 8px;
+     margin-bottom: 6px;
+     align-items: center;
+   }
+
+   /* ضمان استجابة جيدة على شاشات صغيرة */
+   @media (max-width:600px) {
+     #children-list > div, #phones-list > div { flex-direction: column; align-items: stretch; }
+   }
+  </style>
+</head>
+<body>
+  <div id="logo" style="text-align:center; margin:10px;">
+  </div>
+  <div class="app">
+    <div class="card" id="app">
+      <!-- LOGIN SCREEN -->
+      <div id="screen-login" class="center">
+        <img src="assets/images/logo.png" alt="logo" class="logo">
+        <h2>من قلب الألم يولد الأمل</h2>
+        <p class="small">ادخل كلمة المرور للمتابعة</p>
+       <input id="pass" type="password" placeholder="كلمة المرور" />
+        <div class="row">
+          <button id="btn-login">دخول</button>
+        </div>
+      </div>
+      <!-- MAIN MENU -->
+      <div id="screen-menu" class="hidden center">
+         <img src="assets/images/logo.png" alt="logo" class="logo">
+        <div class="row" style="width:100%;justify-content:space-between">
+          <button id="btn-new">تسجيل جديد</button>
+          <button id="btn-list">قوائم الكشف</button>
+          <button id="btn-export">تصدير</button>
+        </div>
+      </div>
+
+      <!-- FORM -->
+      <div id="screen-form" class="hidden">
+         <img src="assets/images/logo.png" alt="logo" class="logo">
+  <h3>نموذج تسجيل جديد</h3>
+  <div class="space"></div>
+
+  <div class="form-field">
+    <label>1 - اسم رب الأسرة</label>
+    <input id="f_head" type="text">
+  </div>
+
+  <div class="form-field">
+    <label>2 - اسم الزوجة</label>
+    <input id="f_spouse" type="text">
+  </div>
+
+  <div class="form-field">
+    <label>3 - عدد الأفراد</label>
+    <input id="f_count" type="number" min="1">
+  </div>
+
+  <div class="form-field">
+    <label>4 - الأبناء</label>
+    <div id="children-list"></div>
+    <button id="add-child" type="button" class="btn-inline">فرد آخر +</button>
+  </div>
+
+  <div class="form-field">
+    <label>5 - أرقام التواصل</label>
+    <div id="phones-list"></div>
+    <button id="add-phone" type="button" class="btn-inline">رقم آخر +</button>
+  </div>
+
+  <div class="form-field">
+    <label>6 - مكان التهجير</label>
+    <input id="f_origin" type="text">
+  </div>
+
+  <div class="form-field">
+    <label>7 - مكان الإقامة الحالي</label>
+    <input id="f_current" type="text">
+  </div>
+
+  <div class="form-field">
+    <label>8 - نوع المنزل</label>
+    <select id="f_home">
+      <option value="ملك">ملك</option>
+      <option value="استضافة">استضافة</option>
+      <option value="اجار">اجار</option>
+    </select>
+  </div>
+  <div class="form-field">
+    <label>9 - يوجد معيل</label>
+    <select id="f_home">
+      <option value="نعم">نعم</option>
+      <option value="لا">لا</option>
+    </select>
+  </div>
+     <div class="form-field">
+    <label> 11- الاحتياجات : </label>
+    <div>
+      <label><input type="checkbox" data-need="food" class="need"> سلة غذائية</label>
+      <input class="need-count hidden" data-need-count="food" type="number" min="0" placeholder="الكمية">
+    </div>
+    <div>
+      <label><input type="checkbox" data-need="mattress" class="need"> فرش</label>
+      <input class="need-count hidden" data-need-count="mattress" type="number" min="0" placeholder="الكمية">
+    </div>
+    <div>
+      <label><input type="checkbox" data-need="blanket" class="need"> بطانيات</label>
+      <input class="need-count hidden" data-need-count="blanket" type="number" min="0" placeholder="الكمية">
+    </div>
+    <div>
+      <label><input type="checkbox" data-need="household" class="need"> ادوات منزلية</label>
+    </div>
+    <div>
+      <label><input type="checkbox" data-need="clothing" class="need"> ملابس واحذية </label>
+    </div>
+    <div>
+  <label><input type="checkbox" data-need="money" class="need"> مبلغ مالي</label>
+  <input class="need-count hidden" data-need-count="money" type="number" min="0" placeholder="قيمة المبلغ">
+</div>
+    <div>
+  <label><input type="checkbox" data-need="medical" class="need"> حالة طبية</label>
+  <textarea class="need-text hidden" data-need-text="medical" placeholder="شرح الحالة الطبية"></textarea>
+</div>
+<div>
+  <label><input type="checkbox" data-need="small-project" class="need"> دعم مشاريع صغيرة</label>
+  <textarea class="need-text hidden" data-need-text="small-project" placeholder="شرح عن المشروع"></textarea>
+</div>
+<div>
+  <label><input type="checkbox" data-need="milk" class="need"> حليب</label>
+  <div class="milk-options hidden" data-milk-options>
+    <label><input type="checkbox" name="milk-type" value="جينا"> جينا</label>
+    <label><input type="checkbox" name="milk-type" value="نان1"> نان 1</label>
+    <label><input type="checkbox" name="milk-type" value="نان2"> نان 2</label>
+  </div>
+</div>
+    <div>
+  <label><input type="checkbox" data-need="diapers" class="need"> حفاضات</label>
+  <textarea class="need-text hidden" data-need-text="diapers" placeholder="شرح عن الحفاضات"></textarea>
+</div>
+  </div>
+
+  <div class="form-field">
+    <label>12 - ملاحظات</label>
+    <textarea id="f_notes" rows="3"></textarea>
+  </div>
+
+  <div class="row" style="margin-top:12px;justify-content:space-between">
+    <button id="btn-back">رجوع</button>
+    <button id="btn-save">حفظ</button>
+  </div>
+</div>
+      <!-- LISTS -->
+      <div id="screen-list" class="hidden">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <img src="assets/images/logo.png" alt="logo" class="logo">
+          <h3>قوائم الكشف</h3>
+          <div class="row">
+            <input id="search" type="text" placeholder="ابحث باسم رب الأسرة أو الزوجة أو بالمواد المقدمة" style="padding:6px">
+            <button id="btn-back-list">رجوع</button>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div id="table-wrap"></div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+// PASSWORD
+const PASSWORD = 'ghosn.team2/9';
+const el = id=>document.getElementById(id);
+const qs = sel=>Array.from(document.querySelectorAll(sel));
+
+// Screens
+const sLogin = el('screen-login');
+const sMenu = el('screen-menu');
+const sForm = el('screen-form');
+const sList = el('screen-list');
+
+// Data store (localStorage)
+const STORE_KEY = 'ghosn_team2_records';
+function loadRecords(){try{return JSON.parse(localStorage.getItem(STORE_KEY)||'[]')}catch(e){return []}}
+function saveRecords(arr){localStorage.setItem(STORE_KEY, JSON.stringify(arr))}
+
+let editIndex = -1;
+
+// show/hide
+function show(screen){[sLogin,sMenu,sForm,sList].forEach(x=>x.classList.add('hidden'));screen.classList.remove('hidden')}
+show(sLogin);
+
+// login handler
+el('btn-login').onclick = ()=>{
+  const v = el('pass').value.trim();
+  if(v===PASSWORD){el('pass').value='';show(sMenu)}else alert('كلمة المرور خاطئة')
+}
+
+// menu buttons
+el('btn-new').onclick = ()=>{openForm();}
+el('btn-list').onclick = ()=>{renderList();show(sList)}
+el('btn-export').onclick = ()=>{exportCSV()}
+
+el('btn-back-list').onclick = ()=>{show(sMenu)}
+el('btn-back').onclick = ()=>{show(sMenu)}
+
+// form helpers
+const childrenList = el('children-list');
+const phonesList = el('phones-list');
+function makeChild(item){ // item: {gender,age,name}
+  const idx = Date.now()+Math.random();
+  const wrap = document.createElement('div');wrap.className='row';wrap.style.marginBottom='6px';
+  const sel = document.createElement('select'); sel.innerHTML='<option value="ذكر">ذكر</option><option value="انثى">انثى</option>'; sel.value=item?.gender||'ذكر';
+  const age = document.createElement('input'); age.type='number'; age.placeholder='العمر'; age.value=item?.age||'';
+  const name = document.createElement('input'); name.type='text'; name.placeholder='الاسم'; name.value=item?.name||'';
+  const del = document.createElement('button'); del.textContent='حذف'; del.onclick=()=>wrap.remove();
+  wrap.appendChild(sel);wrap.appendChild(age);wrap.appendChild(name);wrap.appendChild(del);
+  return wrap;
+}
+function makePhone(val){const wrap=document.createElement('div');wrap.className='row';wrap.style.marginBottom='6px';const input=document.createElement('input');input.type='text';input.placeholder='رقم هاتف';input.value=val||'';const del=document.createElement('button');del.textContent='حذف';del.onclick=()=>wrap.remove();wrap.appendChild(input);wrap.appendChild(del);return wrap}
+
+el('add-child').onclick = ()=>childrenList.appendChild(makeChild());
+el('add-phone').onclick = ()=>phonesList.appendChild(makePhone());
+
+// needs logic
+qs('.need').forEach(ch=>{ch.onchange=()=>{
+  const id = ch.getAttribute('data-need');
+  const cnt = document.querySelector(`[data-need-count="${id}"]`);
+  if(cnt) cnt.classList.toggle('hidden', !ch.checked);
+  const txt = document.querySelector(`[data-need-text="${id}"]`);
+  if(txt) txt.classList.toggle('hidden', !ch.checked);
+   if(id==='diapers'){
+  const txt = document.querySelector('[data-need-text="diapers"]');
+  if(txt) txt.classList.toggle('hidden', !ch.checked);
+} 
+    
+}})
+document.querySelectorAll('.need').forEach(checkbox => {
+  checkbox.addEventListener('change', function() {
+    if (this.dataset.need === 'milk') {
+      const milkDiv = document.querySelector('[data-milk-options]');
+      milkDiv.classList.toggle('hidden', !this.checked);
+    }
+  });
+});
+// diapers controls
+
+
+// open form (reset or load)
+function openForm(data){
+  editIndex = -1;
+  el('f_head').value = data?.head||'';
+  el('f_spouse').value = data?.spouse||'';
+  el('f_count').value = data?.count||'';
+  childrenList.innerHTML = '';
+  (data?.children || []).forEach(c => childrenList.appendChild(makeChild(c)));
+  // إذا لم يكن هناك أطفال مُمرّرين نضيف صف طفل واحد افتراضي
+  if (!(data?.children && data.children.length)) {
+    childrenList.appendChild(makeChild());
+  }
+
+  phonesList.innerHTML = '';
+  (data?.phones || []).forEach(p => phonesList.appendChild(makePhone(p)));
+  // إذا لم تكن هناك أرقام مُمرّرة نضيف حقل رقم واحد افتراضي
+  if (!(data?.phones && data.phones.length)) {
+    phonesList.appendChild(makePhone());
+  }
+  el('f_origin').value = data?.origin||'';
+  el('f_current').value = data?.current||'';
+  el('f_home').value = data?.home||'ملك';
+  // needs
+  qs('.need').forEach(n=>{const id=n.getAttribute('data-need');n.checked = data?.needs?.[id] ? true : false; const cnt=document.querySelector(`[data-need-count="${id}"]`); if(cnt){cnt.classList.toggle('hidden', !n.checked); cnt.value = data?.needs?.[id] || ''}})
+  // diapers
+  // notes
+  el('f_notes').value = data?.notes||'';
+  show(sForm);
+}
+
+// save
+el('btn-save').onclick = ()=>{
+  const record = collectForm();
+  const records = loadRecords();
+  if(editIndex>=0){records[editIndex]=record}else{records.push(record)}
+  saveRecords(records);
+  alert('تم الحفظ');
+  renderList();
+  show(sList);
+}
+
+function collectForm(){
+  const children = Array.from(childrenList.children).map(div=>({gender:div.children[0].value, age:div.children[1].value, name:div.children[2].value}));
+  const phones = Array.from(phonesList.children).map(d=>d.children[0].value).filter(Boolean);
+  const needsEls = qs('.need');
+  const needs = {};
+
+  needsEls.forEach(n => {
+    const id = n.getAttribute('data-need');
+    if (n.checked) {
+      // إذا كان هناك حقل نصي مرتبط بالاحتياج
+      const txt = document.querySelector(`[data-need-text="${id}"]`);
+      const cnt = document.querySelector(`[data-need-count="${id}"]`);
+      if(txt) {
+        needs[id] = txt.value.trim(); // حفظ النص الفعلي
+      } else if(id==='milk'){
+        const selectedMilk = Array.from(document.querySelectorAll('[data-milk-options] input[type="checkbox"]:checked'))
+                              .map(cb => cb.value);
+        needs[id] = selectedMilk;
+      } else if(id==='diapers'){
+  const txt = document.querySelector('[data-need-text="diapers"]');
+  needs[id] = txt ? txt.value.trim() : '';
+} else {
+        needs[id] = cnt ? cnt.value : true;
+      }
+    }
+  });
+
+  return {
+    head: el('f_head').value.trim(),
+    spouse: el('f_spouse').value.trim(),
+    count: el('f_count').value,
+    children, phones,
+    origin: el('f_origin').value,
+    current: el('f_current').value,
+    home: el('f_home').value,
+    needs,
+    notes: el('f_notes').value,
+    created: new Date().toISOString()
+  }
+}
+
+// render list
+function renderList(){
+  const records = loadRecords();
+  const search = el('search').value.trim();
+  const filtered = records.filter(r=>{
+    if(!search) return true;
+    const s = search.toLowerCase();
+    if(r.head?.toLowerCase().includes(s)) return true;
+    if(r.spouse?.toLowerCase().includes(s)) return true;
+    // search needs by key or name
+    for(const k in r.needs){ if(k.includes(s) || (r.needs[k]+''.toLowerCase()).includes(s)) return true }
+    return false;
+  })
+  const wrap = el('table-wrap');
+  if(filtered.length===0){wrap.innerHTML='<p class="small">لا توجد بيانات</p>';return}
+  let html = '<table><thead><tr><th>رب الأسرة</th><th>الزوجة</th><th>عدد الأفراد</th><th>أرقام</th><th> الاحتياجات  </th><th>أدوات</th></tr></thead><tbody>';
+  filtered.forEach((r,i)=>{
+    const phones = (r.phones||[]).join(' - ');
+    const needs = Object.keys(r.needs||{}).map(k => {
+  const name = needsNames[k] || k;
+  const val = r.needs[k];
+  if(k === 'diapers'){
+  return `${name}: ${val}`;
+}
+
+  // إذا كانت القيمة مصفوفة (مثل الحليب)، اعرضها بين أقواس مفصولة بفواصل
+  if (Array.isArray(val)) {
+    return `${name} (${val.join(' - ')})`;
+  }
+
+  return val === true ? name : `${name} (${val})`;
+}).join(', ');
+
+    html += `<tr data-i="${i}"><td>${escapeHTML(r.head||'')}</td><td>${escapeHTML(r.spouse||'')}</td><td>${escapeHTML(r.count||'')}</td><td>${escapeHTML(phones)}</td><td>${escapeHTML(needs)}</td><td class="actions"><button class="view">عرض</button><button class="edit">تعديل</button><button class="del">حذف</button></td></tr>`
+  })
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  // bind actions
+  wrap.querySelectorAll('.view').forEach(b=>b.onclick=function(){const tr=this.closest('tr'); const i=Number(tr.getAttribute('data-i')); viewRecord(i)})
+  wrap.querySelectorAll('.edit').forEach(b=>b.onclick=function(){const tr=this.closest('tr'); const i=Number(tr.getAttribute('data-i')); editRecord(i)})
+  wrap.querySelectorAll('.del').forEach(b=>b.onclick=function(){const tr=this.closest('tr'); const i=Number(tr.getAttribute('data-i')); deleteRecord(i)})
+}
+
+function viewRecord(i){
+  const records = loadRecords();
+  if(!records || !records[i]) {
+    alert("لا توجد بيانات لهذا السجل");
+    return;
+  }
+
+  const r = records[i];
+
+  // تجهيز تفاصيل الاحتياجات
+  const needsDetails = Object.keys(r.needs||{}).map(k=>{
+    const name = needsNames[k] || k;
+    const val = r.needs[k];
+    if(k === 'diapers'){
+  return `${name}: ${val}`;
+}
+
+    if(Array.isArray(val)){
+      // مثل الحليب
+      return `${name}: ${val.join(' - ')}`;
+    }
+
+    if(typeof val === 'string' && val.trim() !== ''){
+      // مثل حالة طبية أو مشروع صغير
+      return `${name}: ${val}`;
+    }
+
+    // لو القيمة عددية
+    if(typeof val === 'number' || !isNaN(val)){
+      return `${name} (${val})`;
+    }
+
+    // لو القيمة boolean
+    if(val === true){
+      return name;
+    }
+
+    return name;
+  }).join('<br>');
+
+  let html = `
+    <div style="padding:10px; font-family:Arial, sans-serif; line-height:1.6;">
+      <div><b>رب الأسرة:</b> ${r.head||''}</div>
+      <div><b>الزوجة:</b> ${r.spouse||''}</div>
+      <div><b>عدد الأفراد:</b> ${r.count||''}</div>
+      <div><b>أرقام التواصل:</b> ${(r.phones||[]).join(' | ')}</div>
+      <div><b>الاحتياجات:</b><br>${needsDetails}</div>
+      <div><b>مكان التهجير:</b> ${r.origin||''}</div>
+      <div><b>مكان الإقامة الحالي:</b> ${r.current||''}</div>
+      <div><b>نوع المنزل:</b> ${r.home||''}</div>
+      <div><b>ملاحظات:</b> ${r.notes||''}</div>
+      <div><b>تاريخ الإنشاء:</b> ${r.created||''}</div>
+    </div>
+    <div style="text-align:center; margin-top:10px;">
+      <button onclick="document.getElementById('view-modal').style.display='none'">إغلاق</button>
+    </div>
+  `;
+
+  const modal = document.getElementById('view-modal');
+  modal.innerHTML = html;
+  modal.style.display = 'block';
+}
+function editRecord(i){ const r = loadRecords()[i]; if(!r) return; editIndex = i; openForm(r) }
+function deleteRecord(i){ if(!confirm('هل تريد حذف السجل؟')) return; const arr = loadRecords(); arr.splice(i,1); saveRecords(arr); renderList() }
+
+// escape helper
+const needsNames = {
+  "food": "سلة غذائية",
+  "mattress": "فرش",
+  "blanket": "بطانيات",
+  "household": "ادوات منزلية",
+  "clothing": "ملابس وأحذية",
+  "money": "مبلغ مالي",
+  "medical": "حالة طبية",
+  "small-project": "دعم مشاريع صغيرة",
+  "diapers": "حفاضات",
+  "milk": "حليب",
+  "gina": "جينا",
+  "nan1": "نان1",
+  "nan2": "نان2"
+};
+function escapeHTML(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// export CSV
+function exportCSV(){
+  const arr = loadRecords(); if(arr.length===0){alert('لا توجد بيانات للتصدير');return}
+  const headers = ['رب_الاسرة','الزوجة','عدد_الافراد','الهواتف','ستتم التلبية ب','مكان_التهجير','مكان_الاقامة','نوع_المنزل','ملاحظات','تاريخ_الانشاء'];
+  const rows = [headers.join(',')];
+  arr.forEach(r=>{
+    const phones = (r.phones||[]).join(' | ');
+    const needs = Object.keys(r.needs||{}).map(k=>{
+                    const name = needsNames[k] || k;
+                    const val = r.needs[k];
+                    return val === true ? name : `${name} (${val})`;
+                  }).join(' ; ')  
+    const row = [r.head, r.spouse, r.count, phones, needs, r.origin, r.current, r.home, (r.notes||''), r.created];
+    rows.push(row.map(cell=>`"${(cell||'').toString().replace(/"/g,'""')}"`).join(','));
+  })
+  const blob = new Blob(["\uFEFF" + rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'ghosn_team2_export.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+// search handler
+el('search').addEventListener('input', ()=>renderList());
+
+// service worker register (optional offline caching) - sw.js provided below
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>console.log('sw failed'))}
+
+</script>
+ <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("service-worker.js");
+    }
+    </script>
+   <div id="view-modal" style="display:none; padding:10px; background:#fff; border:1px solid #ccc; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); max-height:80%; overflow:auto; z-index:9999;">
+    <button onclick="this.parentElement.style.display='none'" style="float:right;">إغلاق</button>
+  </div>
+<script>
+let casesList = []; // مصفوفة لكل الحالات المدخلة
+
+function saveCase() {
+  const familyName = document.getElementById("family-name").value;
+  const caseType = document.getElementById("case-type").value;
+  const details = document.getElementById("details").value;
+
+  // حفظ كائن حالة واحد
+  const oneCase = {
+    familyName,
+    caseType,
+    details
+  };
+
+  casesList.push(oneCase);
+
+  alert("تم حفظ الحالة!");
+}
+function displayCases() {
+  const container = document.getElementById("cases-container");
+  container.innerHTML = "";
+
+  casesList.forEach((c, index) => {
+    container.innerHTML += `
+      <div class="case-card">
+        <h3>${c.familyName}</h3>
+        <p>نوع الحالة: ${c.caseType}</p>
+        <button onclick="showDetails(${index})">عرض التفاصيل</button>
+      </div>
+    `;
+  });
+}
+
+// وهذا أيضاً تضعه بنفس المكان
+function showDetails(index) {
+  const c = casesList[index];
+
+  document.getElementById("details-box").innerHTML = `
+    <h2>تفاصيل الحالة</h2>
+    <p><strong>اسم رب الأسرة:</strong> ${c.familyName}</p>
+    <p><strong>نوع الحالة:</strong> ${c.caseType}</p>
+    <p><strong>الشرح:</strong> ${c.details}</p>
+  `;
+
+  document.getElementById("detail-screen").classList.remove("hidden");
+}
+function showDetails(index) {
+  const c = casesList[index];
+
+  document.getElementById("details-box").innerHTML = `
+    <h2>تفاصيل الحالة</h2>
+    <p><strong>اسم رب الأسرة:</strong> ${c.familyName}</p>
+    <p><strong>نوع الحالة:</strong> ${c.caseType}</p>
+    <p><strong>الشرح:</strong> ${c.details}</p>
+  `;
+
+  document.getElementById("detail-screen").classList.remove("hidden");
+}
+</body>
+</html>
+
